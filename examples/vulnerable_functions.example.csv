@@ -1,0 +1,3 @@
+cve,package,functions
+CVE-2015-2296,requests,requests.sessions.SessionRedirectMixin.resolve_redirects
+CVE-2018-18074,requests,requests.sessions.SessionRedirectMixin.rebuild_auth

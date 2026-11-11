@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools==80.10.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "graph-analysis"
+version = "0.1.0"
+description = "Call-graph-based reachability of CVE-associated functions in Python dependencies"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "certifi==2026.4.22",
+    "packaging==26.2",
+    "pycg==0.0.8",
+    "setuptools==80.10.2",
+]
+
+[project.scripts]
+graph-analysis = "graph_analysis.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["graph_analysis*"]
+
+[tool.setuptools.package-data]
+"graph_analysis.callgraph" = ["templates/index.html"]

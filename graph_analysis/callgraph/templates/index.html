@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vulnerability Reachability Graph</title>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --panel: rgba(6, 10, 20, 0.66);
+      --panel-strong: rgba(7, 12, 24, 0.9);
+      --line: rgba(166, 188, 224, 0.16);
+      --text: #dce5f2;
+      --muted: #8d9aaa;
+      --blue: #5fa8ff;
+      --green: #2fca7c;
+      --red: #f13a32;
+      --yellow: #f6a832;
+      --cve: #b45cff;
+      --path: #ff6fb1;
+      --module-local: #5fa8ff;
+      --module-external: #2fca7c;
+      --edge-blue: rgba(102, 157, 225, 0.26);
+      --edge-red: rgba(222, 53, 54, 0.35);
+      --edge-yellow: rgba(226, 151, 42, 0.34);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      background: linear-gradient(110deg, #08101d 0%, #060915 44%, #030510 100%);
+      color: var(--text);
+      font: 14px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body::before,
+    body::after {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+    }
+
+    body::before {
+      background-image:
+        linear-gradient(rgba(150, 170, 205, 0.026) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(150, 170, 205, 0.022) 1px, transparent 1px);
+      background-size: 36px 36px;
+      mask-image: linear-gradient(90deg, transparent 0%, #000 12%, #000 88%, transparent 100%);
+    }
+
+    body::after {
+      background:
+        radial-gradient(ellipse at center, transparent 32%, rgba(0, 0, 0, 0.24) 72%, rgba(0, 0, 0, 0.6) 100%),
+        linear-gradient(90deg, rgba(7, 12, 24, 0.56), transparent 22%, transparent 78%, rgba(2, 4, 11, 0.58));
+    }
+
+    #graph { width: 100vw; height: 100vh; display: block; }
+    .topbar, .details, .legend {
+      position: fixed;
+      z-index: 5;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+      transition: opacity 160ms ease, transform 160ms ease, background-color 160ms ease;
+    }
+
+    .topbar {
+      top: 16px;
+      left: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      opacity: 1;
+    }
+    .topbar:hover,
+    .topbar:focus-within {
+      background: var(--panel-strong);
+    }
+
+    .title { font-weight: 700; letter-spacing: 0; white-space: nowrap; }
+    .stats { color: var(--muted); white-space: nowrap; }
+    .segmented {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      overflow: hidden;
+    }
+    button {
+      height: 32px;
+      border: 0;
+      border-right: 1px solid var(--line);
+      padding: 0 12px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font: inherit;
+    }
+    button:last-child { border-right: 0; }
+    button.active { background: rgba(98, 169, 255, 0.18); color: var(--text); }
+    button:hover { color: var(--text); }
+    button:focus-visible {
+      outline: 2px solid rgba(95, 168, 255, 0.7);
+      outline-offset: -2px;
+    }
+
+    .legend {
+      left: 16px;
+      bottom: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+      opacity: 0;
+    }
+    .legend:hover {
+      background: var(--panel-strong);
+      opacity: 1;
+    }
+    .legend-row { display: flex; align-items: center; gap: 8px; min-width: 180px; }
+    .swatch { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.62); }
+    .circle { border-radius: 50%; }
+    .blue { background: var(--blue); }
+    .green { background: var(--green); }
+    .red { background: var(--red); }
+    .yellow { background: var(--yellow); }
+    .cve { background: var(--cve); }
+    .path { background: var(--path); }
+    .amber { background: var(--module-external); }
+
+    .details {
+      right: 16px;
+      top: 16px;
+      width: min(380px, calc(100vw - 32px));
+      max-height: calc(100vh - 32px);
+      overflow: auto;
+      padding: 14px;
+      border-radius: 8px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(10px);
+    }
+    .details.is-open {
+      background: var(--panel-strong);
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateX(0);
+    }
+    .details h2 {
+      margin: 0 0 8px;
+      font-size: 16px;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+    .meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .alert {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+    .alert strong { color: var(--text); }
+    .alert-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .badge {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .edge {
+      fill: none;
+      stroke-linecap: round;
+      mix-blend-mode: screen;
+      pointer-events: none;
+    }
+    .node { cursor: pointer; }
+    .node-halo { pointer-events: none; }
+    .node-core {
+      stroke: rgba(226, 235, 247, 0.78);
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+    }
+    .node:hover .node-core { stroke: rgba(255, 255, 255, 0.96); }
+    .node-label {
+      fill: var(--text);
+      paint-order: stroke;
+      stroke: rgba(3, 5, 12, 0.86);
+      stroke-width: 5px;
+      stroke-linejoin: round;
+      font-size: 16px;
+      font-weight: 650;
+      pointer-events: none;
+      text-rendering: geometricPrecision;
+    }
+    .module-label {
+      fill: rgba(220, 229, 242, 0.58);
+      stroke: rgba(3, 5, 12, 0.36);
+      stroke-width: 3px;
+      font-size: 17px;
+      font-weight: 650;
+    }
+    .node.dimmed { opacity: 0.34; }
+    .edge.dimmed { opacity: 0.08; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="title">PyCG + CodeQL</div>
+    <div class="segmented" aria-label="Graph view">
+      <button id="fullBtn" class="active" type="button" aria-pressed="true">Full graph</button>
+      <button id="alertBtn" type="button" aria-pressed="false">Alerted graph</button>
+    </div>
+    <div id="stats" class="stats"></div>
+  </div>
+
+  <aside id="details" class="details">
+    <h2>Graph</h2>
+    <div class="meta">Select a node to inspect CodeQL findings, source files, and project membership. Click a module to expand or collapse its functions.</div>
+  </aside>
+
+  <div class="legend">
+    <div class="legend-row"><span class="swatch circle blue"></span><span>Function</span></div>
+    <div class="legend-row"><span class="swatch circle blue"></span><span>Local module</span></div>
+    <div class="legend-row"><span class="swatch circle green"></span><span>External module</span></div>
+    <div class="legend-row"><span class="swatch red"></span><span>CodeQL alert</span></div>
+    <div class="legend-row"><span class="swatch yellow"></span><span>Recursive caller</span></div>
+    <div class="legend-row"><span class="swatch cve"></span><span>CVE-associated function</span></div>
+    <div class="legend-row"><span class="swatch path"></span><span>Path from entry point</span></div>
+  </div>
+
+  <svg id="graph"></svg>
+
+  <script>
+    const HIGHLIGHT_STATUSES = ["red", "yellow", "cve", "path"];
+    const graphData = __GRAPH_DATA__;
+    const svg = d3.select("#graph");
+    const defs = svg.append("defs");
+    const glow = defs.append("filter")
+      .attr("id", "soft-glow")
+      .attr("x", "-70%")
+      .attr("y", "-70%")
+      .attr("width", "240%")
+      .attr("height", "240%");
+    glow.append("feGaussianBlur")
+      .attr("stdDeviation", 5)
+      .attr("result", "blur");
+    const glowMerge = glow.append("feMerge");
+    glowMerge.append("feMergeNode").attr("in", "blur");
+    glowMerge.append("feMergeNode").attr("in", "SourceGraphic");
+
+    const root = svg.append("g");
+    const edgeLayer = root.append("g");
+    const nodeLayer = root.append("g");
+    const width = () => window.innerWidth;
+    const height = () => window.innerHeight;
+    let mode = "full";
+
+    const byId = new Map(graphData.nodes.map(n => [n.id, n]));
+    const childrenByModule = new Map(graphData.nodes.filter(n => n.kind === "module").map(n => [n.id, new Set(n.children || [])]));
+    const functionModule = new Map(graphData.nodes.filter(n => n.kind === "function").map(n => [n.id, n.module]));
+    const positions = new Map();
+    const expandedModules = new Set(
+      graphData.nodes
+        .filter(node => node.kind === "module" && shouldAutoExpand(node))
+        .map(node => node.id)
+    );
+
+    svg
+      .call(d3.zoom().scaleExtent([0.14, 4.6]).on("zoom", event => root.attr("transform", event.transform)))
+      .on("click", () => document.getElementById("details").classList.remove("is-open"));
+
+    const simulation = d3.forceSimulation()
+      .force("link", d3.forceLink().id(d => d.id).distance(d => linkDistance(d)).strength(d => d.kind === "module" ? 0.1 : 0.18))
+      .force("charge", d3.forceManyBody().strength(nodeCharge))
+      .force("center", d3.forceCenter(width() / 2, height() / 2))
+      .force("x", d3.forceX(targetX).strength(d => d.kind === "module" ? 0.12 : 0.045))
+      .force("y", d3.forceY(targetY).strength(d => d.kind === "module" ? 0.09 : 0.038))
+      .force("collision", d3.forceCollide().radius(d => visualRadius(d) + (d.kind === "module" ? 18 : 28)).strength(0.86));
+
+    function shouldAutoExpand(node) {
+      const childCount = (node.children || []).length;
+      if (!childCount) return false;
+      if (node.scope === "local" && childCount <= 90) return true;
+      return HIGHLIGHT_STATUSES.includes(node.status) && childCount <= 38;
+    }
+
+    function nodeColor(node) {
+      if (node.status === "cve") return getCss("--cve");
+      if (node.status === "path") return getCss("--path");
+      if (node.status === "red") return getCss("--red");
+      if (node.status === "yellow") return getCss("--yellow");
+      if (node.kind === "module") return node.scope === "external" ? getCss("--module-external") : getCss("--module-local");
+      return getCss("--blue");
+    }
+
+    function visualRadius(node) {
+      if (node.kind !== "module") return node.status === "normal" ? 13 : 12;
+      const childCount = (node.children || []).length;
+      const base = node.scope === "external" ? 54 : 50;
+      const scaled = base + Math.sqrt(Math.max(childCount, 1)) * 9;
+      return Math.max(48, Math.min(118, scaled));
+    }
+
+    function nodeOpacity(node) {
+      if (node.kind === "module") return node.scope === "external" ? 0.72 : 0.34;
+      return 0.96;
+    }
+
+    function haloOpacity(node) {
+      if (node.kind === "module") return node.scope === "external" ? 0.24 : 0.18;
+      return node.status === "normal" ? 0.24 : 0.3;
+    }
+
+    function haloRadius(node) {
+      return visualRadius(node) + (node.kind === "module" ? 2 : 6);
+    }
+
+    function nodeCharge(node) {
+      if (node.kind === "module") return node.scope === "external" ? -1850 : -1450;
+      if (node.status === "red") return -260;
+      if (node.status === "yellow") return -230;
+      return -190;
+    }
+
+    function getCss(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    function isVisible(node) {
+      if (mode === "alerts" && !HIGHLIGHT_STATUSES.includes(node.status)) return false;
+      if (node.kind === "module") return true;
+      const parent = byId.get(node.module);
+      if (!parent) return true;
+      if (!expandedModules.has(parent.id)) return false;
+      if (mode === "alerts" && !HIGHLIGHT_STATUSES.includes(parent.status) && !HIGHLIGHT_STATUSES.includes(node.status)) return false;
+      return true;
+    }
+
+    function currentGraph() {
+      const nodes = graphData.nodes.filter(isVisible).map(materializeNode);
+      const visible = new Set(nodes.map(n => n.id));
+      const linksByKey = new Map();
+      for (const edge of graphData.edges) {
+        const source = visibleEndpoint(edge.source);
+        const target = visibleEndpoint(edge.target);
+        if (!source || !target || source === target) continue;
+        if (!visible.has(source) || !visible.has(target)) continue;
+
+        const sourceNode = byId.get(source);
+        const targetNode = byId.get(target);
+        const edgeKind = sourceNode?.kind === "module" && targetNode?.kind === "module" ? "module" : "function";
+        if (mode === "alerts" && !edgeTouchesAlert(sourceNode, targetNode)) continue;
+
+        const key = `${source}->${target}`;
+        const existing = linksByKey.get(key);
+        if (existing) {
+          existing.count += 1;
+          existing.raw_edges.push(edge);
+        } else {
+          linksByKey.set(key, {source, target, kind: edgeKind, count: 1, raw_edges: [edge]});
+        }
+      }
+      const links = Array.from(linksByKey.values());
+      return {nodes, links};
+    }
+
+    function materializeNode(node) {
+      const previous = positions.get(node.id);
+      return {
+        ...node,
+        x: previous?.x ?? seedX(node),
+        y: previous?.y ?? seedY(node),
+        vx: previous?.vx ?? 0,
+        vy: previous?.vy ?? 0
+      };
+    }
+
+    function seedX(node) {
+      const spread = node.kind === "module" ? 180 : 260;
+      return targetX(node) + (hashFloat(node.id) - 0.5) * spread;
+    }
+
+    function seedY(node) {
+      const spread = node.kind === "module" ? 150 : 230;
+      return targetY(node) + (hashFloat(`${node.id}:y`) - 0.5) * spread;
+    }
+
+    function hashFloat(value) {
+      let hash = 2166136261;
+      for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+      }
+      return (hash >>> 0) / 4294967295;
+    }
+
+    function visibleEndpoint(id) {
+      const node = byId.get(id);
+      if (!node) return null;
+      if (node.kind === "module") return node.id;
+      const moduleId = functionModule.get(node.id);
+      if (!moduleId) return node.id;
+      return expandedModules.has(moduleId) ? node.id : moduleId;
+    }
+
+    function edgeTouchesAlert(sourceNode, targetNode) {
+      return [sourceNode, targetNode].some(node => node && HIGHLIGHT_STATUSES.includes(node.status));
+    }
+
+    function render() {
+      const graph = currentGraph();
+      const modeLabel = mode === "alerts" ? "highlighted only" : "full";
+      document.getElementById("stats").textContent =
+        `${modeLabel} | ${graph.nodes.length} nodes | ${graph.links.length} calls | ${graphData.stats.red_count} red | ${graphData.stats.yellow_count} yellow`;
+
+      const links = edgeLayer.selectAll("path").data(graph.links, d => `${edgeId(d.source)}->${edgeId(d.target)}`);
+      links.exit().remove();
+      const linksEnter = links.enter().append("path").attr("class", "edge");
+      const linkSelection = linksEnter.merge(links)
+        .attr("class", "edge")
+        .attr("stroke", linkColor)
+        .attr("stroke-width", linkWidth)
+        .attr("stroke-opacity", linkOpacity);
+
+      const nodes = nodeLayer.selectAll("g").data(graph.nodes, d => d.id);
+      nodes.exit().remove();
+      const enter = nodes.enter().append("g").attr("class", "node").call(drag(simulation));
+      enter.append("circle")
+        .attr("class", "node-halo")
+        .attr("filter", "url(#soft-glow)");
+      enter.append("circle")
+        .attr("class", "node-core")
+        .attr("filter", d => d.kind === "module" ? null : "url(#soft-glow)");
+      enter.append("text")
+        .attr("class", d => `node-label ${d.kind === "module" ? "module-label" : ""}`)
+        .text(d => d.qname);
+      enter.append("title").text(d => d.qname);
+
+      const nodeSelection = enter.merge(nodes);
+      nodeSelection.select(".node-halo")
+        .attr("r", haloRadius)
+        .attr("fill", nodeColor)
+        .attr("fill-opacity", haloOpacity);
+      nodeSelection.select(".node-core")
+        .attr("r", visualRadius)
+        .attr("fill", nodeColor)
+        .attr("fill-opacity", nodeOpacity);
+      nodeSelection.select(".node-label")
+        .text(d => d.qname);
+      nodeSelection
+        .on("click", (event, d) => {
+          event.stopPropagation();
+          showDetails(d);
+          if (d.kind === "module" && childrenByModule.has(d.id)) {
+            if (expandedModules.has(d.id)) expandedModules.delete(d.id);
+            else expandedModules.add(d.id);
+            render();
+          }
+        })
+        .on("mouseenter", (event, d) => focusNode(d, linkSelection, nodeSelection))
+        .on("mouseleave", () => clearFocus(linkSelection, nodeSelection));
+
+      simulation.nodes(graph.nodes).on("tick", () => tick(linkSelection, nodeSelection));
+      simulation.force("link").links(graph.links);
+      simulation.alpha(0.9).restart();
+    }
+
+    function edgeId(endpoint) {
+      return typeof endpoint === "string" ? endpoint : endpoint.id;
+    }
+
+    function tick(linkSelection, nodeSelection) {
+      linkSelection.attr("d", d => {
+        const sx = d.source.x || 0, sy = d.source.y || 0, tx = d.target.x || 0, ty = d.target.y || 0;
+        return `M${sx},${sy}L${tx},${ty}`;
+      });
+      nodeSelection
+        .attr("transform", d => {
+          positions.set(d.id, {x: d.x, y: d.y, vx: d.vx, vy: d.vy});
+          return `translate(${d.x || width() / 2},${d.y || height() / 2})`;
+        });
+      nodeSelection.select(".node-label")
+        .attr("x", labelX)
+        .attr("y", d => d.kind === "module" ? 5 : 5)
+        .attr("text-anchor", labelAnchor);
+    }
+
+    function linkDistance(link) {
+      const s = byId.get(typeof link.source === "string" ? link.source : link.source.id);
+      const t = byId.get(typeof link.target === "string" ? link.target : link.target.id);
+      if (s?.kind === "module" && t?.kind === "module") return 330;
+      if ((s && s.kind === "module") || (t && t.kind === "module")) return 162;
+      return 94;
+    }
+
+    function linkColor(link) {
+      const source = byId.get(edgeId(link.source));
+      const target = byId.get(edgeId(link.target));
+      if ([source, target].some(node => node?.status === "red")) return getCss("--edge-red");
+      if ([source, target].some(node => node?.status === "yellow")) return getCss("--edge-yellow");
+      if ([source, target].some(node => node?.kind === "module")) return "rgba(151, 98, 31, 0.28)";
+      return getCss("--edge-blue");
+    }
+
+    function linkWidth(link) {
+      if (link.kind === "module") return Math.min(2.4, 1.15 + Math.log2(link.count + 1) * 0.32);
+      return Math.min(1.6, 0.95 + Math.log2(link.count + 1) * 0.18);
+    }
+
+    function linkOpacity(link) {
+      const source = byId.get(edgeId(link.source));
+      const target = byId.get(edgeId(link.target));
+      if ([source, target].some(node => HIGHLIGHT_STATUSES.includes(node?.status))) return 0.72;
+      return link.kind === "module" ? 0.46 : 0.38;
+    }
+
+    function targetX(node) {
+      if (node.kind === "module" && node.scope === "external") return width() * 0.82;
+      if (node.scope === "external") return width() * 0.64;
+      if (node.status === "red") return width() * 0.56;
+      if (node.status === "yellow") return width() * 0.61;
+      if (node.kind === "module") return width() * 0.31;
+      return width() * 0.29;
+    }
+
+    function targetY(node) {
+      if (node.kind === "module") return height() * 0.48;
+      if (node.status === "red") return height() * 0.56;
+      if (node.status === "yellow") return height() * 0.61;
+      return height() * 0.5;
+    }
+
+    function labelAnchor(node) {
+      if (node.kind === "module") return "middle";
+      return (node.x ?? targetX(node)) < width() * 0.47 ? "end" : "start";
+    }
+
+    function labelX(node) {
+      if (node.kind === "module") return 0;
+      const offset = visualRadius(node) + 9;
+      return labelAnchor(node) === "end" ? -offset : offset;
+    }
+
+    function focusNode(node, linkSelection, nodeSelection) {
+      const related = new Set([node.id]);
+      linkSelection.classed("dimmed", link => {
+        const source = edgeId(link.source);
+        const target = edgeId(link.target);
+        const touches = source === node.id || target === node.id;
+        if (touches) {
+          related.add(source);
+          related.add(target);
+        }
+        return !touches;
+      });
+      nodeSelection.classed("dimmed", candidate => !related.has(candidate.id));
+    }
+
+    function clearFocus(linkSelection, nodeSelection) {
+      linkSelection.classed("dimmed", false);
+      nodeSelection.classed("dimmed", false);
+    }
+
+    function drag(sim) {
+      return d3.drag()
+        .on("start", event => {
+          if (!event.active) sim.alphaTarget(0.25).restart();
+          event.subject.fx = event.subject.x;
+          event.subject.fy = event.subject.y;
+        })
+        .on("drag", event => {
+          event.subject.fx = event.x;
+          event.subject.fy = event.y;
+        })
+        .on("end", event => {
+          if (!event.active) sim.alphaTarget(0);
+        });
+    }
+
+    function showDetails(node) {
+      const details = document.getElementById("details");
+      const files = (node.files || []).map(escapeHtml).join("<br>") || "No source file recorded";
+      const alerts = (node.alerts || []).map(alert => `
+        <div class="alert">
+          <div class="alert-title">
+            <strong>${escapeHtml(alert.rule_description || alert.rule_id || "CodeQL finding")}</strong>
+            <span class="badge">${escapeHtml(alert.level || "finding")}</span>
+          </div>
+          <div class="meta">${escapeHtml(alert.rule_id || alert.rule_name || "CodeQL")}</div>
+          <div>${escapeHtml(alert.message || alert.rule_description || "")}</div>
+          <div class="meta">${escapeHtml(alert.file || "")}${alert.start_line ? `:${escapeHtml(String(alert.start_line))}` : ""}</div>
+        </div>
+      `).join("");
+      details.classList.add("is-open");
+      details.innerHTML = `
+        <h2>${escapeHtml(node.qname)}</h2>
+        <div class="meta">${escapeHtml(node.kind)} | ${escapeHtml(node.scope)} | ${escapeHtml(node.status)}</div>
+        <div class="meta">Projects: ${escapeHtml((node.projects || []).join(", ") || "none")}</div>
+        <div class="meta">Files:<br>${files}</div>
+        ${node.kind === "module" ? `<div class="meta">${expandedModules.has(node.id) ? "Expanded" : "Collapsed"} | ${(node.children || []).length} children</div>` : ""}
+        ${alerts || '<div class="alert"><strong>No CodeQL finding on this node</strong><div class="meta">No misconfiguration or code-quality alert was mapped here.</div></div>'}
+      `;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, ch => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[ch]));
+    }
+
+    function setMode(nextMode) {
+      mode = nextMode;
+      const isAlertMode = mode === "alerts";
+      document.getElementById("fullBtn").classList.toggle("active", !isAlertMode);
+      document.getElementById("alertBtn").classList.toggle("active", isAlertMode);
+      document.getElementById("fullBtn").setAttribute("aria-pressed", String(!isAlertMode));
+      document.getElementById("alertBtn").setAttribute("aria-pressed", String(isAlertMode));
+      render();
+    }
+
+    document.getElementById("fullBtn").addEventListener("click", () => setMode("full"));
+    document.getElementById("alertBtn").addEventListener("click", () => setMode("alerts"));
+    window.addEventListener("resize", () => {
+      simulation.force("center", d3.forceCenter(width() / 2, height() / 2));
+      simulation.alpha(0.4).restart();
+    });
+
+    render();
+  </script>
+</body>
+</html>

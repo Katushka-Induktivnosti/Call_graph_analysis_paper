@@ -1,0 +1,6 @@
+# Exact versions used to develop and test the pipeline (Python 3.14.6).
+certifi==2026.4.22
+packaging==26.2
+pycg==0.0.8
+# PyCG 0.0.8 imports pkg_resources, which setuptools removed after 80.x.
+setuptools==80.10.2
