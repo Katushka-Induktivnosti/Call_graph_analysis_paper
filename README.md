@@ -1,7 +1,6 @@
 # Unifying dependency and call-graph evidence to trace vulnerability propagation
 
-Artifact for the paper *There and Back Again: Unifying Dependency and Call-Graph
-Evidence to Trace Vulnerability Propagation*. It contains the framework of
+Artifact for the paper *Unifying Dependency and Call Graphs to Trace Vulnerability Reachabilityn*. It contains the framework of
 Section 4 for Python/PyPI and the evaluation procedure of Section 5. **No
 evaluation data is included**: the VIA dataset is obtained from its authors
 (see [Data](#data)), and all graphs, reports and measures are produced by the
